@@ -37,66 +37,77 @@ namespace MQTT
 
         #region Button Events
 
-        private void subButton_Click(object sender, EventArgs e)
+        private void subscribeButton_Click(object sender, EventArgs e)
         {
             if (topicsList.Items.Contains(txtTopic.Text))
             {
                 return;
             }
-            if (txtTopic.Text.Length > 0 && isConnected)
+            if (txtTopic.Text.Length > 0 && mqttIsConnected)
             {
                 subscribe(txtTopic.Text);
                 topicsList.Items.Add(txtTopic.Text);
+                topicsList.SetSelected(topicsList.Items.Count - 1, true);
+                
                 // txtTopic.Clear();
             }
         }
 
-        private void buttonClearLog_Click(object sender, EventArgs e)
+        private void clearLogButton_Click(object sender, EventArgs e)
         {
             clearLog();
         }
 
         private void publishButton_Click(object sender, EventArgs e)
         {
-            if (topicsList.SelectedIndex >= 0 && isConnected)
+            if (topicsList.SelectedIndex >= 0 && mqttIsConnected)
             {
                 publish(topicsList.SelectedItem.ToString(), txtMessage.Text, checkReatain.Checked);
             }
         }
 
-        private void unsubButton_Click(object sender, EventArgs e)
+        private void unsubscribeButton_Click(object sender, EventArgs e)
         {
-            if (topicsList.SelectedIndex >= 0 && isConnected)
+            if (topicsList.SelectedIndex >= 0 && mqttIsConnected)
             {
                 unsubscribe(topicsList.SelectedItem.ToString());
                 topicsList.Items.Remove(topicsList.SelectedItem);
             }
         }
 
-        private void btnConnect_Click(object sender, EventArgs e)
+        private void connectButton_Click(object sender, EventArgs e)
         {
 
-            if (isConnected)
+            if (mqttIsConnected)
             {
                 disconnect();
-                btnConnect.Text = "Connect";
+                connectButton.Text = "Connect";
             }
             else
             {
-                isConnected = connect(txtHost.Text, txtUser.Text, txtPasswd.Text);
-                if (isConnected)
+                mqttIsConnected = connect(txtHost.Text, txtUser.Text, txtPasswd.Text);
+                if (mqttIsConnected)
                 {
-                    host = txtHost.Text;
-                    btnConnect.Text = "Disconnect";
-                    labelStatus.Text = "Connected (" + host + ")";
+                    mqttHost = txtHost.Text;
+                    connectButton.Text = "Disconnect";
+                    statusLabel.Text = "Connected (" + mqttHost + ")";
 
-                    Properties.Settings.Default.host = host;
+                    Properties.Settings.Default.host = mqttHost;
                     Properties.Settings.Default.user = txtUser.Text;
                     Properties.Settings.Default.passwd = txtPasswd.Text;
                     Properties.Settings.Default.Save();
                 }
 
-                logConnected(txtHost.Text, isConnected);
+                logConnected(txtHost.Text, mqttIsConnected);
+            }
+        }
+
+
+        private void topicsList_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if(topicsList.SelectedItems.Count > 0)
+            {
+                selectedSubscription = topicsList.SelectedItems[0].ToString();
             }
         }
 
@@ -115,6 +126,8 @@ namespace MQTT
         {
             // logText("Subscribed for id = " + e.MessageId);
             logSubscribed(e);
+
+            
         }
 
         void client_MqttMsgUnsubscribed(object sender, MqttMsgUnsubscribedEventArgs e)
@@ -131,10 +144,36 @@ namespace MQTT
 
         #endregion
 
+        #region MQTT Actions
+
+        void subscribe(string topic)
+        {
+            if (!mqttIsConnected) { return; }
+            ushort msgId = client.Subscribe(new string[] {"/", topic }, new byte[] { MqttMsgBase.QOS_LEVEL_EXACTLY_ONCE, MqttMsgBase.QOS_LEVEL_AT_LEAST_ONCE });
+        }
+
+        void unsubscribe(string topic)
+        {
+            if (!mqttIsConnected) { return; }
+            ushort msgId = client.Unsubscribe(new string[] { topic });
+        }
+
+        void publish(string topic, string message, Boolean retain)
+        {
+            ushort msgId = client.Publish(topic, // topic
+                              Encoding.UTF8.GetBytes(message), // message body
+                              MqttMsgBase.QOS_LEVEL_EXACTLY_ONCE, // QoS level
+                              retain); // retained
+        }
+
+        #endregion
+
         #region Connection Handling
 
-        Boolean isConnected = false;
-        string host = "///";
+        bool mqttIsConnected = false;
+        string mqttHost = "";
+
+        string selectedSubscription = "";
         
         Boolean connect(string host, string user, string passwd)
         {
@@ -162,9 +201,12 @@ namespace MQTT
             try
             {
                 client.Disconnect();
-                logDisconnected(host);
-                isConnected = false;
-                // Close();
+                logDisconnected(mqttHost);
+                mqttIsConnected = false;
+                topicsList.Items.Clear();
+
+                connectButton.Text = "Connect";
+                statusLabel.Text = "Disconnected";
             }
             catch (Exception)
             {
@@ -176,29 +218,6 @@ namespace MQTT
 
         #endregion
 
-        #region MQTT Actions
-
-        void subscribe(string topic)
-        {
-            if (!isConnected) { return; }
-            ushort msgId = client.Subscribe(new string[] {"/", topic }, new byte[] { MqttMsgBase.QOS_LEVEL_EXACTLY_ONCE, MqttMsgBase.QOS_LEVEL_AT_LEAST_ONCE });
-        }
-
-        void unsubscribe(string topic)
-        {
-            if (!isConnected) { return; }
-            ushort msgId = client.Unsubscribe(new string[] { topic });
-        }
-
-        void publish(string topic, string message, Boolean retain)
-        {
-            ushort msgId = client.Publish(topic, // topic
-                              Encoding.UTF8.GetBytes(message), // message body
-                              MqttMsgBase.QOS_LEVEL_EXACTLY_ONCE, // QoS level
-                              retain); // retained
-        }
-
-        #endregion
 
         #region Logging
 
@@ -217,11 +236,11 @@ namespace MQTT
         private void logReceived(MqttMsgPublishEventArgs e)
         {
             printTimestamp();
-            txtConsole.AppendLog("Received", Color.Yellow, boldFont);
+            logsTextBox.AppendLog("Received", Color.Yellow, boldFont);
             printLog(" (");
-            txtConsole.AppendLog( e.Topic, Color.LightBlue, normalFont);
+            logsTextBox.AppendLog( e.Topic, Color.LightBlue, normalFont);
             printLog("): ");
-            txtConsole.AppendLog(Encoding.UTF8.GetString(e.Message) + Environment.NewLine, Color.LightGray, normalFont);
+            logsTextBox.AppendLog(Encoding.UTF8.GetString(e.Message) + Environment.NewLine, Color.LightGray, normalFont);
         }
 
 
@@ -232,11 +251,11 @@ namespace MQTT
             if (success)
             {
                 printLog("Successfully connected to ");
-                txtConsole.AppendLog(url + Environment.NewLine, Color.LightGray, boldFont);
+                logsTextBox.AppendLog(url + Environment.NewLine, Color.LightGray, boldFont);
             } else
             {
                 printLog("Failed connecting to ");
-                txtConsole.AppendLog(url + Environment.NewLine, Color.LightGray, boldFont);
+                logsTextBox.AppendLog(url + Environment.NewLine, Color.LightGray, boldFont);
             }
 
         }
@@ -246,7 +265,7 @@ namespace MQTT
             printTimestamp();
 
             printLog("Successfully disconnected from ");
-            txtConsole.AppendLog(url + Environment.NewLine, Color.LightGray, boldFont);
+            logsTextBox.AppendLog(url + Environment.NewLine, Color.LightGray, boldFont);
 
 
         }
@@ -254,125 +273,48 @@ namespace MQTT
         private void logPublished(MqttMsgPublishedEventArgs e)
         {
             printTimestamp();
-            txtConsole.AppendLog("Published", Color.Orange, boldFont);
+            logsTextBox.AppendLog("Published to ", Color.Orange, boldFont);
+            logsTextBox.AppendLog(selectedSubscription, Color.LightGray, boldFont);
             printLog(" (" + e.MessageId + "): success = " + e.IsPublished + Environment.NewLine);
         }
 
         private void logSubscribed(MqttMsgSubscribedEventArgs e)
         {
             printTimestamp();
-            txtConsole.AppendLog("Subscribed", Color.LightSkyBlue, boldFont);
+            logsTextBox.AppendLog("Subscribed ", Color.LightSkyBlue, boldFont);
+            logsTextBox.AppendLog(selectedSubscription, Color.LightGray, boldFont);
             printLog(" (" + e.MessageId + ") " + Environment.NewLine);
         }
 
         private void logUnsubscribed(MqttMsgUnsubscribedEventArgs e)
         {
             printTimestamp();
-            txtConsole.AppendLog("Unsubscribed", Color.Coral, boldFont);
+            logsTextBox.AppendLog("Unsubscribed ", Color.Coral, boldFont);
+            logsTextBox.AppendLog(selectedSubscription, Color.LightGray, boldFont);
             printLog(" (" + e.MessageId + ") " + Environment.NewLine);
         }
 
         private void printTimestamp()
         {
             DateTime time = DateTime.Now;
-            txtConsole.AppendLog("[" + time.ToString("HH:mm:ss") + "] ", Color.YellowGreen, normalFont);
+            logsTextBox.AppendLog("[" + time.ToString("HH:mm:ss") + "] ", Color.LightGreen, normalFont);
         }
 
         private void printLog(string text)
         {
-            txtConsole.AppendLog(text, Color.GreenYellow, normalFont);
+            logsTextBox.AppendLog(text, Color.GreenYellow, normalFont);
         }
 
         private void clearLog()
         {
-            txtConsole.Clear();
-            txtConsole.Text = ("=====================\n" +
+            logsTextBox.Clear();
+            logsTextBox.Text = ("=====================\n" +
                     "MQTT-CLIENT v." + this.ProductVersion + "\n" +
                     "=====================\n" +
                     "Created by Tim Strasser.\n\n");
         }
 
         #endregion
-
-        /*
-
-        delegate void StringArgReturningVoidDelegate(string text);
-
-        private void logText(string text)
-        {
-
-            DateTime time = DateTime.Now;
-
-            // InvokeRequired required compares the thread ID of the  
-            // calling thread to the thread ID of the creating thread.  
-            // If these threads are different, it returns true.  
-            if (this.txtConsole.InvokeRequired)
-            {
-                StringArgReturningVoidDelegate d = new StringArgReturningVoidDelegate(logText);
-                this.Invoke(d, new object[] { text });
-            }
-            else
-            {
-                txtConsole.AppendText("[" + time.ToString("HH:mm:ss") + "] " + text + System.Environment.NewLine);
-
-                // this.txtConsole.Text += ;
-                txtConsole.SelectionStart = txtConsole.Text.Length;
-                txtConsole.ScrollToCaret();
-            }
-        }
-
-        private void CheckKeyword(string word, Color color, int startIndex, FontStyle style)
-        {
-            if (this.txtConsole.Text.Contains(word))
-            {
-                int index = -1;
-                int selectStart = this.txtConsole.SelectionStart;
-
-                while ((index = this.txtConsole.Text.IndexOf(word, (index + 1))) != -1)
-                {
-                    if (index > txtConsole.Text.Length - 200)
-                    {
-                        this.txtConsole.Select((index + startIndex), word.Length);
-                        this.txtConsole.SelectionColor = color;
-                        this.txtConsole.SelectionFont = new Font(
-                         txtConsole.Font.FontFamily,
-                         txtConsole.Font.Size,
-                         style);
-                        this.txtConsole.Select(selectStart, 0);
-
-
-                        this.txtConsole.SelectionColor = Color.YellowGreen;
-                    }
-
-                }
-            }
-        }
-
-        */
-
-
-
-        /*
-        private void txtConsole_TextChanged(object sender, EventArgs e)
-        {
-            return;
-
-
-            int lenght = txtConsole.Text.Length - 200;
-            if (lenght < 0)
-            {
-                lenght = 0;
-            }
-
-            this.CheckKeyword("Received", Color.Yellow, 0, FontStyle.Bold);
-            this.CheckKeyword("Published", Color.Orange, 0, FontStyle.Bold);
-            this.CheckKeyword(host, Color.LightGray, 0, FontStyle.Bold);
-            foreach (var listBoxItem in topicsList.Items)
-            {
-                this.CheckKeyword(listBoxItem.ToString(), Color.LightBlue, 0, FontStyle.Regular);
-            }
-        }
-        */
 
     }
 }
